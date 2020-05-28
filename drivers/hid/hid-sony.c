@@ -576,14 +576,10 @@ static void sony_set_leds(struct sony_sc *sc);
 static inline void sony_schedule_work(struct sony_sc *sc,
 				      enum sony_worker which)
 {
-	unsigned long flags;
-
 	switch (which) {
 	case SONY_WORKER_STATE:
-		spin_lock_irqsave(&sc->lock, flags);
-		if (!sc->defer_initialization && sc->state_worker_initialized)
+		if (!sc->defer_initialization)
 			schedule_work(&sc->state_worker);
-		spin_unlock_irqrestore(&sc->lock, flags);
 		break;
 	case SONY_WORKER_HOTPLUG:
 		if (sc->hotplug_worker_initialized)
@@ -1035,7 +1031,6 @@ static void dualshock4_parse_report(struct sony_sc *sc, u8 *rd, int size)
 	else
 		num_touch_data = 1;
 	offset += 1;
-
 	for (m = 0; m < num_touch_data; m++) {
 		/* Skip past timestamp */
 		offset += 1;
@@ -1105,6 +1100,7 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 		sixaxis_parse_report(sc, rd, size);
 	} else if ((sc->quirks & DUALSHOCK4_CONTROLLER_USB) && rd[0] == 0x01 &&
 			size == 64) {
+<<<<<<< HEAD
 		dualshock4_parse_report(sc, rd, size);
 	} else if (((sc->quirks & DUALSHOCK4_CONTROLLER_BT) && rd[0] == 0x11 &&
 			size == 78)) {
@@ -1123,6 +1119,26 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 		}
 
 		dualshock4_parse_report(sc, rd, size);
+=======
+		dualshock4_parse_report(sc, rd, size);
+	} else if (((sc->quirks & DUALSHOCK4_CONTROLLER_BT) && rd[0] == 0x11 &&
+			size == 78)) {
+		/* CRC check */
+		u8 bthdr = 0xA1;
+		u32 crc;
+		u32 report_crc;
+
+		crc = crc32_le(0xFFFFFFFF, &bthdr, 1);
+		crc = ~crc32_le(crc, rd, DS4_INPUT_REPORT_0x11_SIZE-4);
+		report_crc = get_unaligned_le32(&rd[DS4_INPUT_REPORT_0x11_SIZE-4]);
+		if (crc != report_crc) {
+			hid_dbg(sc->hdev, "DualShock 4 input report's CRC check failed, received crc 0x%0x != 0x%0x\n",
+				report_crc, crc);
+			return -EILSEQ;
+		}
+
+		dualshock4_parse_report(sc, rd, size);
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 	} else if ((sc->quirks & DUALSHOCK4_DONGLE) && rd[0] == 0x01 &&
 			size == 64) {
 		unsigned long flags;
@@ -1375,6 +1391,161 @@ static int sony_register_sensors(struct sony_sc *sc)
 
 	__set_bit(INPUT_PROP_ACCELEROMETER, sc->sensor_dev->propbit);
 
+<<<<<<< HEAD
+	if (sc->quirks & NAVIGATION_CONTROLLER)
+		return navigation_mapping(hdev, hi, field, usage, bit, max);
+
+	if (sc->quirks & SIXAXIS_CONTROLLER)
+		return sixaxis_mapping(hdev, hi, field, usage, bit, max);
+
+	if (sc->quirks & DUALSHOCK4_CONTROLLER)
+		return ds4_mapping(hdev, hi, field, usage, bit, max);
+
+
+	/* Let hid-core decide for the others */
+	return 0;
+}
+
+static int sony_register_touchpad(struct sony_sc *sc, int touch_count,
+					int w, int h)
+{
+	size_t name_sz;
+	char *name;
+	int ret;
+
+	sc->touchpad = input_allocate_device();
+	if (!sc->touchpad)
+		return -ENOMEM;
+
+	input_set_drvdata(sc->touchpad, sc);
+	sc->touchpad->dev.parent = &sc->hdev->dev;
+	sc->touchpad->phys = sc->hdev->phys;
+	sc->touchpad->uniq = sc->hdev->uniq;
+	sc->touchpad->id.bustype = sc->hdev->bus;
+	sc->touchpad->id.vendor = sc->hdev->vendor;
+	sc->touchpad->id.product = sc->hdev->product;
+	sc->touchpad->id.version = sc->hdev->version;
+
+	/* Append a suffix to the controller name as there are various
+	 * DS4 compatible non-Sony devices with different names.
+	 */
+	name_sz = strlen(sc->hdev->name) + sizeof(DS4_TOUCHPAD_SUFFIX);
+	name = kzalloc(name_sz, GFP_KERNEL);
+	if (!name) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	snprintf(name, name_sz, "%s" DS4_TOUCHPAD_SUFFIX, sc->hdev->name);
+	sc->touchpad->name = name;
+
+	ret = input_mt_init_slots(sc->touchpad, touch_count, INPUT_MT_POINTER);
+	if (ret < 0)
+		goto err;
+
+	/* We map the button underneath the touchpad to BTN_LEFT. */
+	__set_bit(EV_KEY, sc->touchpad->evbit);
+	__set_bit(BTN_LEFT, sc->touchpad->keybit);
+	__set_bit(INPUT_PROP_BUTTONPAD, sc->touchpad->propbit);
+
+	input_set_abs_params(sc->touchpad, ABS_MT_POSITION_X, 0, w, 0, 0);
+	input_set_abs_params(sc->touchpad, ABS_MT_POSITION_Y, 0, h, 0, 0);
+
+	ret = input_register_device(sc->touchpad);
+	if (ret < 0)
+		goto err;
+
+	return 0;
+
+err:
+	kfree(sc->touchpad->name);
+	sc->touchpad->name = NULL;
+
+	input_free_device(sc->touchpad);
+	sc->touchpad = NULL;
+
+	return ret;
+}
+
+static void sony_unregister_touchpad(struct sony_sc *sc)
+{
+	if (!sc->touchpad)
+		return;
+
+	kfree(sc->touchpad->name);
+	sc->touchpad->name = NULL;
+
+	input_unregister_device(sc->touchpad);
+	sc->touchpad = NULL;
+}
+
+static int sony_register_sensors(struct sony_sc *sc)
+{
+	size_t name_sz;
+	char *name;
+	int ret;
+	int range;
+
+	sc->sensor_dev = input_allocate_device();
+	if (!sc->sensor_dev)
+		return -ENOMEM;
+
+	input_set_drvdata(sc->sensor_dev, sc);
+	sc->sensor_dev->dev.parent = &sc->hdev->dev;
+	sc->sensor_dev->phys = sc->hdev->phys;
+	sc->sensor_dev->uniq = sc->hdev->uniq;
+	sc->sensor_dev->id.bustype = sc->hdev->bus;
+	sc->sensor_dev->id.vendor = sc->hdev->vendor;
+	sc->sensor_dev->id.product = sc->hdev->product;
+	sc->sensor_dev->id.version = sc->hdev->version;
+
+	/* Append a suffix to the controller name as there are various
+	 * DS4 compatible non-Sony devices with different names.
+	 */
+	name_sz = strlen(sc->hdev->name) + sizeof(SENSOR_SUFFIX);
+	name = kzalloc(name_sz, GFP_KERNEL);
+	if (!name) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	snprintf(name, name_sz, "%s" SENSOR_SUFFIX, sc->hdev->name);
+	sc->sensor_dev->name = name;
+
+	if (sc->quirks & SIXAXIS_CONTROLLER) {
+		/* For the DS3 we only support the accelerometer, which works
+		 * quite well even without calibration. The device also has
+		 * a 1-axis gyro, but it is very difficult to manage from within
+		 * the driver even to get data, the sensor is inaccurate and
+		 * the behavior is very different between hardware revisions.
+		 */
+		input_set_abs_params(sc->sensor_dev, ABS_X, -512, 511, 4, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_Y, -512, 511, 4, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_Z, -512, 511, 4, 0);
+		input_abs_set_res(sc->sensor_dev, ABS_X, SIXAXIS_ACC_RES_PER_G);
+		input_abs_set_res(sc->sensor_dev, ABS_Y, SIXAXIS_ACC_RES_PER_G);
+		input_abs_set_res(sc->sensor_dev, ABS_Z, SIXAXIS_ACC_RES_PER_G);
+	} else if (sc->quirks & DUALSHOCK4_CONTROLLER) {
+		range = DS4_ACC_RES_PER_G*4;
+		input_set_abs_params(sc->sensor_dev, ABS_X, -range, range, 16, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_Y, -range, range, 16, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_Z, -range, range, 16, 0);
+		input_abs_set_res(sc->sensor_dev, ABS_X, DS4_ACC_RES_PER_G);
+		input_abs_set_res(sc->sensor_dev, ABS_Y, DS4_ACC_RES_PER_G);
+		input_abs_set_res(sc->sensor_dev, ABS_Z, DS4_ACC_RES_PER_G);
+
+		range = DS4_GYRO_RES_PER_DEG_S*2048;
+		input_set_abs_params(sc->sensor_dev, ABS_RX, -range, range, 16, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_RY, -range, range, 16, 0);
+		input_set_abs_params(sc->sensor_dev, ABS_RZ, -range, range, 16, 0);
+		input_abs_set_res(sc->sensor_dev, ABS_RX, DS4_GYRO_RES_PER_DEG_S);
+		input_abs_set_res(sc->sensor_dev, ABS_RY, DS4_GYRO_RES_PER_DEG_S);
+		input_abs_set_res(sc->sensor_dev, ABS_RZ, DS4_GYRO_RES_PER_DEG_S);
+
+		__set_bit(EV_MSC, sc->sensor_dev->evbit);
+		__set_bit(MSC_TIMESTAMP, sc->sensor_dev->mscbit);
+	}
+
+	__set_bit(INPUT_PROP_ACCELEROMETER, sc->sensor_dev->propbit);
+
 	ret = input_register_device(sc->sensor_dev);
 	if (ret < 0)
 		goto err;
@@ -1403,6 +1574,36 @@ static void sony_unregister_sensors(struct sony_sc *sc)
 	sc->sensor_dev = NULL;
 }
 
+=======
+	ret = input_register_device(sc->sensor_dev);
+	if (ret < 0)
+		goto err;
+
+	return 0;
+
+err:
+	kfree(sc->sensor_dev->name);
+	sc->sensor_dev->name = NULL;
+
+	input_free_device(sc->sensor_dev);
+	sc->sensor_dev = NULL;
+
+	return ret;
+}
+
+static void sony_unregister_sensors(struct sony_sc *sc)
+{
+	if (!sc->sensor_dev)
+		return;
+
+	kfree(sc->sensor_dev->name);
+	sc->sensor_dev->name = NULL;
+
+	input_unregister_device(sc->sensor_dev);
+	sc->sensor_dev = NULL;
+}
+
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 
 /*
  * Sending HID_REQ_GET_REPORT changes the operation mode of the ps3 controller
@@ -1454,6 +1655,7 @@ static int sixaxis_set_operational_bt(struct hid_device *hdev)
 {
 	static const u8 report[] = { 0xf4, 0x42, 0x03, 0x00, 0x00 };
 	u8 *buf;
+<<<<<<< HEAD
 	int ret;
 
 	buf = kmemdup(report, sizeof(report), GFP_KERNEL);
@@ -1475,6 +1677,8 @@ static int sixaxis_set_operational_bt(struct hid_device *hdev)
 static int dualshock4_get_calibration_data(struct sony_sc *sc)
 {
 	u8 *buf;
+=======
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 	int ret;
 	short gyro_pitch_bias, gyro_pitch_plus, gyro_pitch_minus;
 	short gyro_yaw_bias, gyro_yaw_plus, gyro_yaw_minus;
@@ -1610,6 +1814,179 @@ static int dualshock4_get_calibration_data(struct sony_sc *sc)
 err_stop:
 	kfree(buf);
 	return ret;
+}
+
+<<<<<<< HEAD
+static void dualshock4_calibration_work(struct work_struct *work)
+{
+	struct sony_sc *sc = container_of(work, struct sony_sc, hotplug_worker);
+	unsigned long flags;
+	enum ds4_dongle_state dongle_state;
+=======
+/*
+ * Request DS4 calibration data for the motion sensors.
+ * For Bluetooth this also affects the operating mode (see below).
+ */
+static int dualshock4_get_calibration_data(struct sony_sc *sc)
+{
+	u8 *buf;
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
+	int ret;
+	short gyro_pitch_bias, gyro_pitch_plus, gyro_pitch_minus;
+	short gyro_yaw_bias, gyro_yaw_plus, gyro_yaw_minus;
+	short gyro_roll_bias, gyro_roll_plus, gyro_roll_minus;
+	short gyro_speed_plus, gyro_speed_minus;
+	short acc_x_plus, acc_x_minus;
+	short acc_y_plus, acc_y_minus;
+	short acc_z_plus, acc_z_minus;
+	int speed_2x;
+	int range_2g;
+
+	/* For Bluetooth we use a different request, which supports CRC.
+	 * Note: in Bluetooth mode feature report 0x02 also changes the state
+	 * of the controller, so that it sends input reports of type 0x11.
+	 */
+	if (sc->quirks & (DUALSHOCK4_CONTROLLER_USB | DUALSHOCK4_DONGLE)) {
+		buf = kmalloc(DS4_FEATURE_REPORT_0x02_SIZE, GFP_KERNEL);
+		if (!buf)
+			return -ENOMEM;
+
+<<<<<<< HEAD
+	ret = dualshock4_get_calibration_data(sc);
+	if (ret < 0) {
+		/* This call is very unlikely to fail for the dongle. When it
+		 * fails we are probably in a very bad state, so mark the
+		 * dongle as disabled. We will re-enable the dongle if a new
+		 * DS4 hotplug is detect from sony_raw_event as any issues
+		 * are likely resolved then (the dongle is quite stupid).
+		 */
+		hid_err(sc->hdev, "DualShock 4 USB dongle: calibration failed, disabling device\n");
+		dongle_state = DONGLE_DISABLED;
+	} else {
+		hid_info(sc->hdev, "DualShock 4 USB dongle: calibration completed\n");
+		dongle_state = DONGLE_CONNECTED;
+	}
+
+	spin_lock_irqsave(&sc->lock, flags);
+	sc->ds4_dongle_state = dongle_state;
+	spin_unlock_irqrestore(&sc->lock, flags);
+=======
+		ret = hid_hw_raw_request(sc->hdev, 0x02, buf,
+					 DS4_FEATURE_REPORT_0x02_SIZE,
+					 HID_FEATURE_REPORT,
+					 HID_REQ_GET_REPORT);
+		if (ret < 0)
+			goto err_stop;
+	} else {
+		u8 bthdr = 0xA3;
+		u32 crc;
+		u32 report_crc;
+		int retries;
+
+		buf = kmalloc(DS4_FEATURE_REPORT_0x05_SIZE, GFP_KERNEL);
+		if (!buf)
+			return -ENOMEM;
+
+		for (retries = 0; retries < 3; retries++) {
+			ret = hid_hw_raw_request(sc->hdev, 0x05, buf,
+						 DS4_FEATURE_REPORT_0x05_SIZE,
+						 HID_FEATURE_REPORT,
+						 HID_REQ_GET_REPORT);
+			if (ret < 0)
+				goto err_stop;
+
+			/* CRC check */
+			crc = crc32_le(0xFFFFFFFF, &bthdr, 1);
+			crc = ~crc32_le(crc, buf, DS4_FEATURE_REPORT_0x05_SIZE-4);
+			report_crc = get_unaligned_le32(&buf[DS4_FEATURE_REPORT_0x05_SIZE-4]);
+			if (crc != report_crc) {
+				hid_warn(sc->hdev, "DualShock 4 calibration report's CRC check failed, received crc 0x%0x != 0x%0x\n",
+					report_crc, crc);
+				if (retries < 2) {
+					hid_warn(sc->hdev, "Retrying DualShock 4 get calibration report request\n");
+					continue;
+				} else {
+					ret = -EILSEQ;
+					goto err_stop;
+				}
+			} else {
+				break;
+			}
+		}
+	}
+
+	gyro_pitch_bias  = get_unaligned_le16(&buf[1]);
+	gyro_yaw_bias    = get_unaligned_le16(&buf[3]);
+	gyro_roll_bias   = get_unaligned_le16(&buf[5]);
+	if (sc->quirks & DUALSHOCK4_CONTROLLER_USB) {
+		gyro_pitch_plus  = get_unaligned_le16(&buf[7]);
+		gyro_pitch_minus = get_unaligned_le16(&buf[9]);
+		gyro_yaw_plus    = get_unaligned_le16(&buf[11]);
+		gyro_yaw_minus   = get_unaligned_le16(&buf[13]);
+		gyro_roll_plus   = get_unaligned_le16(&buf[15]);
+		gyro_roll_minus  = get_unaligned_le16(&buf[17]);
+	} else {
+		/* BT + Dongle */
+		gyro_pitch_plus  = get_unaligned_le16(&buf[7]);
+		gyro_yaw_plus    = get_unaligned_le16(&buf[9]);
+		gyro_roll_plus   = get_unaligned_le16(&buf[11]);
+		gyro_pitch_minus = get_unaligned_le16(&buf[13]);
+		gyro_yaw_minus   = get_unaligned_le16(&buf[15]);
+		gyro_roll_minus  = get_unaligned_le16(&buf[17]);
+	}
+	gyro_speed_plus  = get_unaligned_le16(&buf[19]);
+	gyro_speed_minus = get_unaligned_le16(&buf[21]);
+	acc_x_plus       = get_unaligned_le16(&buf[23]);
+	acc_x_minus      = get_unaligned_le16(&buf[25]);
+	acc_y_plus       = get_unaligned_le16(&buf[27]);
+	acc_y_minus      = get_unaligned_le16(&buf[29]);
+	acc_z_plus       = get_unaligned_le16(&buf[31]);
+	acc_z_minus      = get_unaligned_le16(&buf[33]);
+
+	/* Set gyroscope calibration and normalization parameters.
+	 * Data values will be normalized to 1/DS4_GYRO_RES_PER_DEG_S degree/s.
+	 */
+	speed_2x = (gyro_speed_plus + gyro_speed_minus);
+	sc->ds4_calib_data[0].abs_code = ABS_RX;
+	sc->ds4_calib_data[0].bias = gyro_pitch_bias;
+	sc->ds4_calib_data[0].sens_numer = speed_2x*DS4_GYRO_RES_PER_DEG_S;
+	sc->ds4_calib_data[0].sens_denom = gyro_pitch_plus - gyro_pitch_minus;
+
+	sc->ds4_calib_data[1].abs_code = ABS_RY;
+	sc->ds4_calib_data[1].bias = gyro_yaw_bias;
+	sc->ds4_calib_data[1].sens_numer = speed_2x*DS4_GYRO_RES_PER_DEG_S;
+	sc->ds4_calib_data[1].sens_denom = gyro_yaw_plus - gyro_yaw_minus;
+
+	sc->ds4_calib_data[2].abs_code = ABS_RZ;
+	sc->ds4_calib_data[2].bias = gyro_roll_bias;
+	sc->ds4_calib_data[2].sens_numer = speed_2x*DS4_GYRO_RES_PER_DEG_S;
+	sc->ds4_calib_data[2].sens_denom = gyro_roll_plus - gyro_roll_minus;
+
+	/* Set accelerometer calibration and normalization parameters.
+	 * Data values will be normalized to 1/DS4_ACC_RES_PER_G G.
+	 */
+	range_2g = acc_x_plus - acc_x_minus;
+	sc->ds4_calib_data[3].abs_code = ABS_X;
+	sc->ds4_calib_data[3].bias = acc_x_plus - range_2g / 2;
+	sc->ds4_calib_data[3].sens_numer = 2*DS4_ACC_RES_PER_G;
+	sc->ds4_calib_data[3].sens_denom = range_2g;
+
+	range_2g = acc_y_plus - acc_y_minus;
+	sc->ds4_calib_data[4].abs_code = ABS_Y;
+	sc->ds4_calib_data[4].bias = acc_y_plus - range_2g / 2;
+	sc->ds4_calib_data[4].sens_numer = 2*DS4_ACC_RES_PER_G;
+	sc->ds4_calib_data[4].sens_denom = range_2g;
+
+	range_2g = acc_z_plus - acc_z_minus;
+	sc->ds4_calib_data[5].abs_code = ABS_Z;
+	sc->ds4_calib_data[5].bias = acc_z_plus - range_2g / 2;
+	sc->ds4_calib_data[5].sens_numer = 2*DS4_ACC_RES_PER_G;
+	sc->ds4_calib_data[5].sens_denom = range_2g;
+
+err_stop:
+	kfree(buf);
+	return ret;
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 }
 
 static void dualshock4_calibration_work(struct work_struct *work)
@@ -2484,15 +2861,23 @@ static inline void sony_init_output_report(struct sony_sc *sc,
 				void (*send_output_report)(struct sony_sc *))
 {
 	sc->send_output_report = send_output_report;
+<<<<<<< HEAD
 
 	if (!sc->state_worker_initialized)
 		INIT_WORK(&sc->state_worker, sony_state_worker);
 
+=======
+
+	if (!sc->state_worker_initialized)
+		INIT_WORK(&sc->state_worker, sony_state_worker);
+
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 	sc->state_worker_initialized = 1;
 }
 
 static inline void sony_cancel_work_sync(struct sony_sc *sc)
 {
+<<<<<<< HEAD
 	unsigned long flags;
 
 	if (sc->hotplug_worker_initialized)
@@ -2501,10 +2886,19 @@ static inline void sony_cancel_work_sync(struct sony_sc *sc)
 		spin_lock_irqsave(&sc->lock, flags);
 		sc->state_worker_initialized = 0;
 		spin_unlock_irqrestore(&sc->lock, flags);
+=======
+	if (sc->hotplug_worker_initialized)
+		cancel_work_sync(&sc->hotplug_worker);
+	if (sc->state_worker_initialized)
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 		cancel_work_sync(&sc->state_worker);
 	}
 }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5d7b06f09963... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 static int sony_input_configured(struct hid_device *hdev,
 					struct hid_input *hidinput)
 {
@@ -2770,6 +3164,67 @@ static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (!(hdev->claimed & HID_CLAIMED_INPUT)) {
 		hid_err(hdev, "failed to claim input\n");
 		hid_hw_stop(hdev);
+		return -ENODEV;
+	}
+
+	return ret;
+}
+
+static int sony_probe(struct hid_device *hdev, const struct hid_device_id *id)
+{
+	int ret;
+	unsigned long quirks = id->driver_data;
+	struct sony_sc *sc;
+	unsigned int connect_mask = HID_CONNECT_DEFAULT;
+
+	sc = devm_kzalloc(&hdev->dev, sizeof(*sc), GFP_KERNEL);
+	if (sc == NULL) {
+		hid_err(hdev, "can't alloc sony descriptor\n");
+		return -ENOMEM;
+	}
+
+	spin_lock_init(&sc->lock);
+
+	sc->quirks = quirks;
+	hid_set_drvdata(hdev, sc);
+	sc->hdev = hdev;
+
+	ret = hid_parse(hdev);
+	if (ret) {
+		hid_err(hdev, "parse failed\n");
+		return ret;
+	}
+
+	if (sc->quirks & VAIO_RDESC_CONSTANT)
+		connect_mask |= HID_CONNECT_HIDDEV_FORCE;
+	else if (sc->quirks & SIXAXIS_CONTROLLER)
+		connect_mask |= HID_CONNECT_HIDDEV_FORCE;
+
+	/* Patch the hw version on DS3/4 compatible devices, so applications can
+	 * distinguish between the default HID mappings and the mappings defined
+	 * by the Linux game controller spec. This is important for the SDL2
+	 * library, which has a game controller database, which uses device ids
+	 * in combination with version as a key.
+	 */
+	if (sc->quirks & (SIXAXIS_CONTROLLER | DUALSHOCK4_CONTROLLER))
+		hdev->version |= 0x8000;
+
+	ret = hid_hw_start(hdev, connect_mask);
+	if (ret) {
+		hid_err(hdev, "hw start failed\n");
+		return ret;
+	}
+
+	/* sony_input_configured can fail, but this doesn't result
+	 * in hid_hw_start failures (intended). Check whether
+	 * the HID layer claimed the device else fail.
+	 * We don't know the actual reason for the failure, most
+	 * likely it is due to EEXIST in case of double connection
+	 * of USB and Bluetooth, but could have been due to ENOMEM
+	 * or other reasons as well.
+	 */
+	if (!(hdev->claimed & HID_CLAIMED_INPUT)) {
+		hid_err(hdev, "failed to claim input\n");
 		return -ENODEV;
 	}
 
