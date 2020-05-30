@@ -813,15 +813,12 @@ struct mdss_panel_info {
 	u32 tp_rst_seq_len;
 	u32 vic; /* video identification code */
 	u32 deep_color;
-<<<<<<< HEAD
 	bool is_ce_mode; /* CE video format */
 	u8 csc_type;
-=======
 	u32 esd_err_irq_gpio;
 	u32 esd_err_irq;
 	u32 esd_interrupt_flags;
 	struct mdss_panel_esd_check initial_esd_check;
->>>>>>> 5d7b06f... Kernel: Xiaomi kernel changes for MI MAX3 and MI 8Lite Android Q.
 	struct mdss_rect roi;
 	struct mdss_dsi_dual_pu_roi dual_roi;
 	int pwm_pmic_gpio;
