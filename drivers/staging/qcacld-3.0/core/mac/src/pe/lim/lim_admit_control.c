@@ -189,8 +189,8 @@ lim_validate_tspec(tpAniSirGlobal pMac,
 	case SIR_MAC_ACCESSPOLICY_EDCA:
 		retval = lim_validate_tspec_edca(pMac, pTspec, psessionEntry);
 		if (retval != eSIR_SUCCESS)
-			pe_warn("EDCA tspec invalid");
-			break;
+		pe_warn("EDCA tspec invalid");
+		break;
 
 	case SIR_MAC_ACCESSPOLICY_HCCA:
 	case SIR_MAC_ACCESSPOLICY_BOTH:
@@ -352,8 +352,8 @@ static tSirRetStatus lim_admit_policy(tpAniSirGlobal pMac,
 							   &pMac->lim.tspecInfo[0],
 							   psessionEntry);
 		if (retval != eSIR_SUCCESS)
-			pe_err("rejected by BWFactor policy");
-			break;
+		pe_err("rejected by BWFactor policy");
+		break;
 
 	case WNI_CFG_ADMIT_POLICY_REJECT_ALL:
 		retval = eSIR_FAILURE;
