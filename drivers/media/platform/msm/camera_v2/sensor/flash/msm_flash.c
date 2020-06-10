@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2009-2017, 2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -448,7 +448,6 @@ static int32_t msm_flash_i2c_release(
 			__func__, __LINE__);
 		return -EINVAL;
 	}
-	flash_ctrl->flash_state = MSM_CAMERA_FLASH_RELEASE;
 	return 0;
 }
 
