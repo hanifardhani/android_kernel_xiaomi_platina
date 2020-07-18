@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2018, 2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -231,6 +231,8 @@ static inline void msm_pm_qos_add_request(void)
 static void msm_pm_qos_remove_request(void)
 {
 	pr_info("%s: remove request", __func__);
+	if (!atomic_cmpxchg(&qos_add_request_done, 1, 0))
+		return;
 	pm_qos_remove_request(&msm_v4l2_pm_qos_request);
 }
 
@@ -630,7 +632,6 @@ static inline int __msm_remove_session_cmd_ack_q(void *d1, void *d2)
 static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 {
 	if (!session)
-		return;
 
 	mutex_lock(&session->lock);
 	/* to ensure error handling purpose, it needs to detach all subdevs

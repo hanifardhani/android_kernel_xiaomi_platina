@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, 2020, The Linux Foundation. All rights reserved.
  * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -1669,8 +1669,8 @@ static int qpnp_lcdb_init_bst(struct qpnp_lcdb *lcdb)
 
 		if (lcdb->bst.ps != -EINVAL) {
 			rc = qpnp_lcdb_masked_write(lcdb, lcdb->base +
-					LCDB_PS_CTL_REG, EN_PS_BIT,
-					lcdb->bst.ps ? EN_PS_BIT : 0);
+				LCDB_PS_CTL_REG, EN_PS_BIT,
+				lcdb->bst.ps ? EN_PS_BIT : 0);
 			if (rc < 0) {
 				pr_err("Failed to disable BST PS rc=%d", rc);
 				return rc;
