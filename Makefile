@@ -672,6 +672,10 @@ KBUILD_CFLAGS += -O3
 endif
 endif
 
+ifeq ($(cc-name),gcc)
+KBUILD_CFLAGS	+= -Wno-psabi
+endif
+
 ifdef CONFIG_CC_WERROR
 KBUILD_CFLAGS	+= -Werror
 endif
