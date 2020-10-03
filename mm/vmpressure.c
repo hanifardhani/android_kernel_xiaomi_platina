@@ -267,6 +267,20 @@ static void vmpressure_memcg(gfp_t gfp, struct mem_cgroup *memcg, bool critical,
 	struct vmpressure *vmpr = memcg_to_vmpressure(memcg);
 
 	BUG_ON(!vmpr);
+ 
+ /*
+	 * Here we only want to account pressure that userland is able to
+	 * help us with. For example, suppose that DMA zone is under
+	 * pressure; if we notify userland about that kind of pressure,
+	 * then it will be mostly a waste as it will trigger unnecessary
+	 * freeing of memory by userland (since userland is more likely to
+	 * have HIGHMEM/MOVABLE pages instead of the DMA fallback). That
+	 * is why we include only movable, highmem and FS/IO pages.
+	 * Indirect reclaim (kswapd) sets sc->gfp_mask to GFP_KERNEL, so
+	 * we account it too.
+	 */
+	if (!(gfp & (__GFP_HIGHMEM | __GFP_MOVABLE | __GFP_IO | __GFP_FS)))
+		return;
 
 	/*
 	 * If we got here with no pages scanned, then that is an indicator
@@ -299,25 +313,29 @@ static void vmpressure_global(gfp_t gfp, unsigned long scanned, bool critical,
 	unsigned long pressure;
 	unsigned long stall;
 
-	if (critical)
-		scanned = calculate_vmpressure_win();
+	if (!(gfp & (__GFP_HIGHMEM | __GFP_MOVABLE | __GFP_IO | __GFP_FS)))
+		return;
 
-	if (scanned) {
+	if (!scanned)
+		return;
+
 		spin_lock(&vmpr->sr_lock);
-		vmpr->scanned += scanned;
-		vmpr->reclaimed += reclaimed;
+	if (!vmpr->scanned)
+		calculate_vmpressure_win();
 
-		if (!current_is_kswapd())
-			vmpr->stall += scanned;
+  vmpr->scanned += scanned;
+	vmpr->reclaimed += reclaimed;
 
-		stall = vmpr->stall;
-		scanned = vmpr->scanned;
-		reclaimed = vmpr->reclaimed;
-		spin_unlock(&vmpr->sr_lock);
+	if (!current_is_kswapd())
+		vmpr->stall += scanned;
 
-		if (!critical && scanned < calculate_vmpressure_win())
-			return;
-	}
+	stall = vmpr->stall;
+	scanned = vmpr->scanned;
+	reclaimed = vmpr->reclaimed;
+	spin_unlock(&vmpr->sr_lock);
+
+	if (scanned < vmpressure_win)
+		return;
 
 	spin_lock(&vmpr->sr_lock);
 	vmpr->scanned = 0;
@@ -325,12 +343,8 @@ static void vmpressure_global(gfp_t gfp, unsigned long scanned, bool critical,
 	vmpr->stall = 0;
 	spin_unlock(&vmpr->sr_lock);
 
-	if (scanned) {
-		pressure = vmpressure_calc_pressure(scanned, reclaimed);
-		pressure = vmpressure_account_stall(pressure, stall, scanned);
-	} else {
-		pressure = 100;
-	}
+	pressure = vmpressure_calc_pressure(scanned, reclaimed);
+	pressure = vmpressure_account_stall(pressure, stall, scanned);
 	vmpressure_notify(pressure);
 }
 
