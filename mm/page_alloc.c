@@ -3322,11 +3322,8 @@ noretry:
 	if (page)
 		goto got_pg;
 nopage:
+	warn_alloc_failed(gfp_mask, order, NULL);
 got_pg:
-	if (woke_kswapd)
-		atomic_dec(&pgdat->kswapd_waiters);
-	if (!page)
-		warn_alloc_failed(gfp_mask, order, NULL);
 	return page;
 }
 
