@@ -813,6 +813,8 @@ struct mdss_panel_info {
 	u32 tp_rst_seq_len;
 	u32 vic; /* video identification code */
 	u32 deep_color;
+  bool is_ce_mode; /* CE video format */
+  u8 csc_type;
 	u32 esd_err_irq_gpio;
 	u32 esd_err_irq;
 	u32 esd_interrupt_flags;
